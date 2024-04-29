@@ -1,5 +1,5 @@
 import pyaudio
-from libxheopus import DualOpusDecoder, CustomFileContainer
+from libxheopus import DualOpusDecoder, XopusReader
 
 # Initialize PyAudio
 p = pyaudio.PyAudio()
@@ -8,18 +8,13 @@ decoder = DualOpusDecoder()
 
 streamoutput = p.open(format=pyaudio.paInt16, channels=2, rate=48000, output=True)
 
-file = open(r"test.xopus", 'rb')
+xopusdecoder = XopusReader(r"test.xopus")
 
-line = file.read().split(b"\\xa")
-
-deserialized_container = CustomFileContainer.deserialize(line[0])
-print(deserialized_container.metadata)
+print(xopusdecoder.readmetadata())
 
 try:
-    for data in line[1:]:
-        if data:
-            streamoutput.write(decoder.decode(data))
-
+    for data in xopusdecoder.decode(decoder, True):
+        streamoutput.write(data)
 
 except KeyboardInterrupt:
     print("Interrupted by user")
