@@ -3,6 +3,9 @@ xHE-Opus is extended High Efficiency. It use Dual-Encoder to encode per channel 
 It provides optimal coding efficiency with bitrates from 6 to 510 kilobits per second and above.
 It has content loudness metadata on footer.
 
+# Demo
+
+
 # Install
 [PyOgg (damp11113 moded)](https://github.com/damp11113/PyOgg)
 
@@ -32,9 +35,9 @@ $ python3 encode.py input.wav output.xopus -b 16000
 ## Decoder/Player
 To player or decode this file you can use
 ```bash
-$ python3 input.xopus
+$ python3 player.py input.xopus
 ```
 or if you want only convert to wav you can use
 ```bash
-$ python3 input.xopus -o output.wav
+$ python3 player.py input.xopus -o output.wav
 ```
