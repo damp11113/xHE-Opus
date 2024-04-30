@@ -1,7 +1,6 @@
 import importlib
 import math
 import struct
-
 import pyogg
 import os
 import numpy as np
@@ -109,7 +108,6 @@ class DualOpusEncoder:
 
         @return chunk size
         """
-
         if self.version != "hev2" and size > 60:
             raise ValueError("non hev2 can't use framesize > 60")
 
@@ -336,12 +334,18 @@ class XopusReader:
                 if data.startswith(b"\\xeof\\xeof"):
                     break
                 else:
-                     yield decoder.decode(data)
+                    try:
+                        yield decoder.decode(data)
+                    except:
+                        yield b""
         else:
             decodedlist = []
             for data in self.xopusline[1:]:
                 if data.startswith(b"\\xeof\\xeof"):
                     break
                 else:
-                    decodedlist.append(decoder.decode(data))
+                    try:
+                        decodedlist.append(decoder.decode(data))
+                    except:
+                        decodedlist.append(b"")
             return decodedlist
