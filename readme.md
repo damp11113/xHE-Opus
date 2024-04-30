@@ -1,5 +1,7 @@
 # xHE-Opus
 xHE-Opus is extended High Efficiency. It use Dual-Encoder to encode per channel and bitrate is divide 2 for per channel.
+It provides optimal coding efficiency with bitrates from 6 to 510 kilobits per second and above.
+It has content loudness metadata on footer.
 
 # Install
 [PyOgg (damp11113 moded)](https://github.com/damp11113/PyOgg)
