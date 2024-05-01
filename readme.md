@@ -1,7 +1,11 @@
+![xHE-Opus](https://github.com/damp11113/xHE-Opus/assets/64675096/331bb248-82da-47d2-b930-0caabfd5bc75)
 # xHE-Opus
 xHE-Opus is extended High Efficiency. It use Dual-Encoder to encode per channel and bitrate is divide 2 for per channel.
 It provides optimal coding efficiency with bitrates from 6 to 510 kilobits per second and above.
 It has content loudness metadata on footer.
+
+![xheopusquality](https://github.com/damp11113/xHE-Opus/assets/64675096/c2d898c3-7a5e-487b-bd2c-0a364eeec1e7)
+
 
 # Demo
 https://github.com/damp11113/xHE-Opus/assets/64675096/5792f6b4-4ffd-4995-a1ad-97d245b1d1a2
