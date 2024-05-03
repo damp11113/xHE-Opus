@@ -16,7 +16,13 @@ https://github.com/damp11113/xHE-Opus/assets/64675096/5792f6b4-4ffd-4995-a1ad-97
 [PyOgg (damp11113 moded)](https://github.com/damp11113/PyOgg)
 
 # Using
-## Encoder
+## Gui
+easy to use
+![image](https://github.com/damp11113/xHE-Opus/assets/64675096/be06bc60-3e51-4866-a8fc-63976a264779)
+
+## Cli
+command line with encode.py and player.py
+### Encoder
 to encode you can use
 ```bash
 $ python3 encode.py
@@ -38,7 +44,7 @@ or if you want to set bitrate you can use `-b <bitrate>` input bit per sec (bps)
 $ python3 encode.py input.wav output.xopus -b 16000
 ```
 
-## Decoder/Player
+### Decoder/Player
 To player or decode this file you can use
 ```bash
 $ python3 player.py input.xopus
