@@ -15,7 +15,7 @@ parser.add_argument('-fs', '--framesize', help='Set frame size: 120, 100, 80, 60
 parser.add_argument('-bm', '--bitmode', help='Set Bitrate mode: CBR VBR CVBR', default="CVBR")
 parser.add_argument('-bw', '--bandwidth', help='Set bandwidth: auto, fullband, superwideband, wideband, mediumband or narrowband', default="fullband")
 parser.add_argument('-a', '--app', help='Set bandwidth: restricted_lowdelay, audio, voip', default="restricted_lowdelay")
-parser.add_argument('-v', '--ver', help='Set opus version: hev2 (enable 120, 100, 80 framesize), he, exper, stable, old', default="hev2")
+parser.add_argument('-v', '--ver', help='Set opus version: hev2 (enable 120, 100, 80 framesize), exper, stable, old', default="hev2")
 parser.add_argument('-pred', '--prediction', help='Enable prediction', action='store_true', default=False)
 parser.add_argument('-ph', '--phaseinvert', help='Enable phase invert', action='store_true', default=False)
 parser.add_argument('-dtx', help='Enable discontinuous transmission', action='store_true', default=False)

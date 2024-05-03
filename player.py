@@ -47,9 +47,9 @@ if not args.output:
     progress.desc = "played"
 else:
     progress.desc = "converting..."
-    outwav = wave.open("output.wav", "w")
+    outwav = wave.open(args.output, "w")
     # Set the parameters of the WAV file
-    outwav.setnchannels(2)  # Mono
+    outwav.setnchannels(2)  # Stereo
     outwav.setsampwidth(2)  # 2 bytes (16 bits) per sample
     outwav.setframerate(48000)
     for data in xopusdecoder.decode(decoder, True):

@@ -10,7 +10,6 @@ class DualOpusEncoder:
         """
         ----------------------------- version--------------------------
         hev2: libopus 1.5.1 (fre:ac)
-        he: libopus 1.5.2 (moded)
         exper: libopus 1.5.1
         stable: libopus 1.4
         old: libopus 1.3.1
@@ -291,7 +290,10 @@ class XopusWriter:
         rms = np.sqrt(np.mean(np.square(normalized_audio)))
 
         # Calculate dBFS
-        dbfs = 20 * math.log10(rms)
+        try:
+            dbfs = 20 * math.log10(rms)
+        except:
+            dbfs = 0
         self.loudnessperframe.append(dbfs)
 
         encoded = self.encoder.encode(pcm, directpcm=True)
@@ -308,8 +310,8 @@ class XopusWriter:
 
 class XopusReader:
     def __init__(self, file):
-        file = open(file, 'rb')
-        self.xopusline = file.read().split(b"\\xa")
+        self.file = open(file, 'rb')
+        self.xopusline = self.file.read().split(b"\\xa")
 
     def readmetadata(self):
         header = HeaderContainer.deserialize(self.xopusline[0])
@@ -320,7 +322,7 @@ class XopusReader:
             raise EOFError("can't find EOF")
 
         data = {
-            "header": header.metadata,
+            "header": dict(header.metadata),
             "footer": {
                 "contentloudness": footer.loudness_avg,
                 "length": footer.length
@@ -328,9 +330,9 @@ class XopusReader:
         }
         return data
 
-    def decode(self, decoder, play=False):
+    def decode(self, decoder, play=False, start=0):
         if play:
-            for data in self.xopusline[1:]:
+            for data in self.xopusline[start + 1:]:
                 if data.startswith(b"\\xeof\\xeof"):
                     break
                 else:
@@ -349,3 +351,7 @@ class XopusReader:
                     except:
                         decodedlist.append(b"")
             return decodedlist
+
+    def close(self):
+        self.xopusline = []
+        self.file.close()
