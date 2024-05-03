@@ -1,3 +1,5 @@
+**im making c++ version for more efficiency!**
+
 ![xHE-Opus](https://github.com/damp11113/xHE-Opus/assets/64675096/331bb248-82da-47d2-b930-0caabfd5bc75)
 # xHE-Opus
 xHE-Opus is extended High Efficiency. It use Dual-Encoder to encode per channel and bitrate is divide 2 for per channel.
