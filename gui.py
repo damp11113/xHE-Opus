@@ -80,6 +80,14 @@ class App:
             dpg.configure_item("deplayconvert", show=False)
 
     def convert(self):
+        stereomode = str(dpg.get_value("opusstereomode")).lower()
+        if stereomode == "stereo l/r":
+            stereomode = 1
+        elif stereomode == "stereo mid/side":
+            stereomode = 2
+        else:
+            stereomode = 2
+
         try:
             total = 0
             current = 0
@@ -92,6 +100,7 @@ class App:
             encoder.set_bitrates(int(dpg.get_value("opusbitrate")*1000))
             encoder.set_compression(dpg.get_value("opuscompression"))
             encoder.set_packet_loss(dpg.get_value("opuspacketloss"))
+            encoder.set_stereo_mode(stereomode, dpg.get_value("opusenajoint"))
             encoder.set_feature(dpg.get_value("opusenapred"), False, dpg.get_value("opusenadtx"))
             desired_frame_size = encoder.set_frame_size(int(dpg.get_value("opusframesize")))
 
@@ -136,6 +145,7 @@ class App:
 
         except Exception as e:
             dpg.set_value("convertstatus", str(e))
+            raise e
         else:
             dpg.set_value("convertstatus", "Converted")
 
@@ -170,7 +180,10 @@ class App:
 
                 self.decurrentplay += 1
 
-                dpg.set_value("deplayingprog", min(1.0, max(0.0, self.decurrentplay / self.delen)))
+                try:
+                    dpg.set_value("deplayingprog", min(1.0, max(0.0, self.decurrentplay / self.delen)))
+                except:
+                    dpg.set_value("deplayingprog", 0)
             else:
                 if self.decurrentplay != 0:
                     self.depausepos = self.decurrentplay
@@ -252,11 +265,13 @@ class App:
             dpg.add_combo(["voip", "audio", "restricted_lowdelay"], label="Application", default_value="restricted_lowdelay", tag="opusapp")
             dpg.add_combo(["VBR", "CVBR", "CBR"], label="Bitrate Mode", default_value="CVBR", tag="opusbitmode")
             dpg.add_combo(["auto", "fullband", "superwideband", "wideband", "mediumband", "narrowband"], label="Bandwidth", tag="opusbandwidth", default_value="fullband")
+            dpg.add_combo(["Stereo L/R", "Stereo Mid/Side"], label="Stereo Mode", tag="opusstereomode", default_value="Stereo L/R")
             dpg.add_input_float(label="Bitrates", min_value=5, max_value=1020, min_clamped=True, max_clamped=True, step_fast=1, default_value=64, tag="opusbitrate")
             dpg.add_input_int(label="Compression Level", max_clamped=True, min_clamped=True, min_value=0, max_value=10, default_value=10, tag="opuscompression")
             dpg.add_input_int(label="Packet Loss", max_clamped=True, min_clamped=True, min_value=0, max_value=100, default_value=0, tag="opuspacketloss")
             dpg.add_checkbox(label="Prediction", tag="opusenapred")
             dpg.add_checkbox(label="DTX", tag="opusenadtx")
+            dpg.add_checkbox(label="Joint", tag="opusenajoint")
             dpg.add_button(label="Convert", callback=self.startconvert)
 
         with dpg.window(label="converting", show=False, tag="convertingwindow", modal=True, no_resize=True, no_move=True, no_title_bar=True, width=320):
