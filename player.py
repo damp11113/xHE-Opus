@@ -1,5 +1,5 @@
 import pyaudio
-from libxheopus import DualOpusDecoder, XopusReader
+from libxheopus import xOpusDecoder, XopusReader
 import argparse
 from tqdm import tqdm
 import wave
@@ -16,7 +16,7 @@ progress = tqdm()
 # Initialize PyAudio
 p = pyaudio.PyAudio()
 
-decoder = DualOpusDecoder()
+decoder = xOpusDecoder()
 
 xopusdecoder = XopusReader(args.input)
 

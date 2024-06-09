@@ -47,6 +47,14 @@ class App:
             if int(dpg.get_value("opusframesize")) > 60:
                 dpg.configure_item("opusframesize", default_value="60")
 
+    def changeprofileopus(self, sender, data):
+        if data == "xHE-Opus v2":
+            dpg.configure_item("opusstereomode", show=False)
+            dpg.configure_item("opusbitrate", min_value=2.5, max_value=510, min_clamped=True, max_clamped=True, step_fast=1, default_value=64)
+        else:
+            dpg.configure_item("opusstereomode", show=True)
+            dpg.configure_item("opusbitrate", min_value=5, max_value=1020, min_clamped=True, max_clamped=True, step_fast=1, default_value=64)
+
     def selectdeoutputpath(self, sender, data):
         file_path = easygui.diropenbox()
         dpg.set_value("deoutpathshow", f"output: {file_path}")
@@ -80,6 +88,8 @@ class App:
             dpg.configure_item("deplayconvert", show=False)
 
     def convert(self):
+        signaltype = str(dpg.get_value("opussignaltype")).lower()
+        profile = str(dpg.get_value("opusprofile")).strip().lower()
         stereomode = str(dpg.get_value("opusstereomode")).lower()
         if stereomode == "stereo l/r":
             stereomode = 1
@@ -88,20 +98,40 @@ class App:
         else:
             stereomode = 2
 
+        if signaltype == "music":
+            signalauto = False
+            signalvoice = False
+        elif signaltype == "voice":
+            signalauto = False
+            signalvoice = True
+        else:
+            signalauto = True
+            signalvoice = False
+
         try:
             total = 0
             current = 0
             filename = os.path.splitext(os.path.basename(self.inputfilepath))[0]
 
             dpg.set_value("convertstatus", "init encoder...")
-            encoder = libxheopus.DualOpusEncoder(dpg.get_value("opusapp"), 48000, dpg.get_value("opusversion"))
+            print(profile)
+            if profile == "xhe-opus v1":
+                encoder = libxheopus.DualOpusEncoder(dpg.get_value("opusapp"), 48000, dpg.get_value("opusversion"))
+            else:
+                encoder = libxheopus.PSOpusEncoder(dpg.get_value("opusapp"), 48000, dpg.get_value("opusversion"))
+
             encoder.set_bitrate_mode(dpg.get_value("opusbitmode"))
             encoder.set_bandwidth(dpg.get_value("opusbandwidth"))
             encoder.set_bitrates(int(dpg.get_value("opusbitrate")*1000))
             encoder.set_compression(dpg.get_value("opuscompression"))
             encoder.set_packet_loss(dpg.get_value("opuspacketloss"))
-            encoder.set_stereo_mode(stereomode, dpg.get_value("opusenajoint"))
+
+            if profile != "xhe-opus v2":
+                encoder.set_stereo_mode(stereomode, dpg.get_value("opusenajoint"))
+
             encoder.set_feature(dpg.get_value("opusenapred"), False, dpg.get_value("opusenadtx"))
+            encoder.enable_voice_mode(signalvoice, signalauto)
+
             desired_frame_size = encoder.set_frame_size(int(dpg.get_value("opusframesize")))
 
             dpg.set_value("convertstatus", "init writer...")
@@ -168,7 +198,7 @@ class App:
         self.delen = metadata["footer"]["length"]
 
     def playaudiothread(self):
-        self.decoder = libxheopus.DualOpusDecoder()
+        self.decoder = libxheopus.xOpusDecoder()
         for data in self.derender.decode(self.decoder, True, self.depausepos):
             if self.deplay:
 
@@ -229,7 +259,7 @@ class App:
         outwav.setsampwidth(2)  # 2 bytes (16 bits) per sample
         outwav.setframerate(48000)
 
-        self.decoder = libxheopus.DualOpusDecoder()
+        self.decoder = libxheopus.xOpusDecoder()
         for data in self.derender.decode(self.decoder, True, self.depausepos):
             self.decurrentplay += 1
 
@@ -260,18 +290,20 @@ class App:
             dpg.add_text("output:", tag="outpathshow")
             dpg.add_button(label="Select Input File", callback=self.selectinputfile)
             dpg.add_button(label="Select Output Path", callback=self.selectoutputpath)
+            dpg.add_combo(["xHE-Opus v1", "xHE-Opus v2"], label="Profile", default_value="xHE-Opus v1", tag="opusprofile", callback=self.changeprofileopus)
             dpg.add_combo(["hev2", "exper", "stable", "old"], label="Version", default_value="hev2", tag="opusversion", callback=self.changeversionopus)
             dpg.add_combo(["120", "100", "80", "60", "40", "20", "10", "5"], label="Frame Size (ms)", tag="opusframesize", default_value="120")
             dpg.add_combo(["voip", "audio", "restricted_lowdelay"], label="Application", default_value="restricted_lowdelay", tag="opusapp")
             dpg.add_combo(["VBR", "CVBR", "CBR"], label="Bitrate Mode", default_value="CVBR", tag="opusbitmode")
             dpg.add_combo(["auto", "fullband", "superwideband", "wideband", "mediumband", "narrowband"], label="Bandwidth", tag="opusbandwidth", default_value="fullband")
             dpg.add_combo(["Stereo L/R", "Stereo Mid/Side"], label="Stereo Mode", tag="opusstereomode", default_value="Stereo L/R")
+            dpg.add_combo(["Auto", "Voice", "Music"], label="Signal Type", tag="opussignaltype", default_value="Auto")
             dpg.add_input_float(label="Bitrates", min_value=5, max_value=1020, min_clamped=True, max_clamped=True, step_fast=1, default_value=64, tag="opusbitrate")
             dpg.add_input_int(label="Compression Level", max_clamped=True, min_clamped=True, min_value=0, max_value=10, default_value=10, tag="opuscompression")
             dpg.add_input_int(label="Packet Loss", max_clamped=True, min_clamped=True, min_value=0, max_value=100, default_value=0, tag="opuspacketloss")
             dpg.add_checkbox(label="Prediction", tag="opusenapred")
             dpg.add_checkbox(label="DTX", tag="opusenadtx")
-            dpg.add_checkbox(label="Joint", tag="opusenajoint")
+            dpg.add_checkbox(label="Auto Mono (Mid/Side Encoding)", tag="opusenajoint")
             dpg.add_button(label="Convert", callback=self.startconvert)
 
         with dpg.window(label="converting", show=False, tag="convertingwindow", modal=True, no_resize=True, no_move=True, no_title_bar=True, width=320):
