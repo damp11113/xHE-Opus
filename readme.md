@@ -56,3 +56,7 @@ or if you want only convert to wav you can use
 ```bash
 $ python3 player.py input.xopus -o output.wav
 ```
+## Encode with foobar2000
+you can encode xopus with foobar by follow this setup
+
+![image](https://github.com/damp11113/xHE-Opus/assets/64675096/3d285f77-3ac3-4fdf-9320-7de9df30e36c)
