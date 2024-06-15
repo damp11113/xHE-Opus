@@ -40,7 +40,11 @@ else:
     print("no profile available")
     sys.exit()
 
-encoder.set_bitrates(args.bitrate, args.samebitrate)
+if args.profile == 1:
+    encoder.set_bitrates(args.bitrate, args.samebitrate)
+elif args.profile == 2:
+    encoder.set_bitrates(args.bitrate)
+    
 encoder.set_bitrate_mode(args.bitmode)
 encoder.set_bandwidth(args.bandwidth)
 encoder.set_compression(args.compress)
