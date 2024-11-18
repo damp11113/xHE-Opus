@@ -15,7 +15,7 @@ def int16_to_float32(data_int16):
     return data_float32
 
 class DualOpusEncoder:
-    def __init__(self, app="audio", samplerate=48000, version="stable"):
+    def __init__(self, app="restricted_lowdelay", samplerate=48000, version="stable"):
         """
         ----------------------------- version--------------------------
         hev2: libopus 1.5.1 (fre:ac)
@@ -51,8 +51,14 @@ class DualOpusEncoder:
         """
         self.version = version
         self.samplerate = samplerate
-        self.stereomode = 1 #0 = mono, 1 = stereo LR, 2 = stereo Mid/Side
-        self.audiomono = False
+        self.stereomode = 1 #0 = mono, 1 = Stereo LR, 2 = Stereo Mid/Side, 3 = Stereo Intensity
+        self.automonogate = -50
+        self.automono = False
+        self.msmono = False
+        self.overallbitrate = 0
+        self.secbitrate = 0
+        self.intensity = 1
+        self.bitratemode = 1 # 0 = CBR, 1 = CVBR, 2 = VBR
 
         os.environ["pyogg_win_libopus_version"] = version
         importlib.reload(pyogg.opus)
@@ -82,18 +88,46 @@ class DualOpusEncoder:
         self.Lencoder.set_compresion_complex(level)
         self.Rencoder.set_compresion_complex(level)
 
-    def set_bitrates(self, bitrates=64000, samebitrate=False):
-        """input birate unit: bps"""
+    def set_bitrates(self, bitrates=64000, samebitrate=False, balance_percent=None):
+        """
+        input birate unit: bps
+
+        balance_percent is working good with M/S stereo
+        """
         if bitrates <= 5000:
             bitrates = 5000
 
-        if samebitrate:
-            bitperchannel = bitrates
-        else:
-            bitperchannel = bitrates / 2
+        if balance_percent is None:
+            if self.stereomode == 0:
+                balance_percent = 100
+            elif self.stereomode == 2:
+                balance_percent = 75
+            else:
+                balance_percent = 50
 
-        self.Lencoder.set_bitrates(int(bitperchannel))
-        self.Rencoder.set_bitrates(int(bitperchannel))
+        self.overallbitrate = bitrates
+
+        if samebitrate:
+            self.Lencoder.set_bitrates(int(bitrates))
+            self.Rencoder.set_bitrates(int(bitrates))
+        else:
+            percentage_decimal = balance_percent / 100
+            bitratech1 = round(bitrates * percentage_decimal)
+            bitratech2 = bitrates - bitratech1
+
+            if bitratech1 < 2500:
+                bitratech1 = 2500
+
+            if bitratech2 < 2500:
+                self.msmono = True
+                bitratech2 = 2500
+            else:
+                self.msmono = False
+
+            self.secbitrate = bitratech1
+
+            self.Lencoder.set_bitrates(int(bitratech1))
+            self.Rencoder.set_bitrates(int(bitratech2))
 
     def set_bandwidth(self, bandwidth="fullband"):
         """
@@ -117,19 +151,25 @@ class DualOpusEncoder:
         self.Lencoder.set_bandwidth(bandwidth)
         self.Rencoder.set_bandwidth(bandwidth)
 
-    def set_stereo_mode(self, mode=1, audiomono=False):
+    def set_stereo_mode(self, mode=1, automono=False, automonogate=-50, intensity=1, changebitratesbalance=False):
         """
-        0 = mono
+        0 = mono (not recommend)
         1 = stereo LR
-        2 = stereo Mid/Side (Joint encoding)
+        2 = stereo Mid/Side
+        3 = Intensity
         """
         if mode > 2:
             mode = 1
 
         self.stereomode = mode
-        self.audiomono = audiomono
+        self.automono = automono
+        self.automonogate = automonogate
+        self.intensity = intensity
 
-    def set_frame_size(self, size=60):
+        if changebitratesbalance:
+            self.set_bitrates(self.overallbitrate)
+
+    def set_frame_size(self, size=60, nocheck=False):
         """ Set the desired frame duration (in milliseconds).
         Valid options are 2.5, 5, 10, 20, 40, or 60ms.
         Exclusive for HE opus v2 (freac opus) 80, 100 or 120ms.
@@ -139,8 +179,8 @@ class DualOpusEncoder:
         if self.version != "hev2" and size > 60:
             raise ValueError("non hev2 can't use framesize > 60")
 
-        self.Lencoder.set_frame_size(size)
-        self.Rencoder.set_frame_size(size)
+        self.Lencoder.set_frame_size(size, nocheck)
+        self.Rencoder.set_frame_size(size, nocheck)
 
         return int((size / 1000) * self.samplerate)
 
@@ -156,6 +196,14 @@ class DualOpusEncoder:
         """VBR, CVBR, CBR
         VBR in 1.5.x replace by CVBR
         """
+        if mode.lower() == "cbr":
+            self.bitratemode = 0
+        elif mode.lower() == "cvbr":
+            self.bitratemode = 1
+        elif mode.lower() == "vbr":
+            self.bitratemode = 2
+        else:
+            raise ValueError(f"No {mode} bitrate mode option")
 
         self.Lencoder.set_bitrate_mode(mode)
         self.Rencoder.set_bitrate_mode(mode)
@@ -217,20 +265,35 @@ class DualOpusEncoder:
             mid = float32_to_int16(mid)
             intside = float32_to_int16(side)
 
-            midencoded_packet = self.Lencoder.buffered_encode(memoryview(bytearray(mid)), flush=True)[0][0].tobytes()
-
             # check if side is no audio or loudness <= -50 DBFS
             try:
                 loudnessside = 20 * math.log10(np.sqrt(np.mean(np.square(side))))
             except:
                 loudnessside = 0
 
-            if (loudnessside) <= -50 and self.audiomono:
+            if (loudnessside) <= self.automonogate and self.automono or self.msmono:
                 sideencoded_packet = b"\\xnl"
+                if self.bitratemode == 0: # CBR
+                    self.Lencoder.set_bitrates(int(self.overallbitrate - 300))
             else:
+                self.Lencoder.set_bitrates(int(self.secbitrate))
                 sideencoded_packet = self.Rencoder.buffered_encode(memoryview(bytearray(intside)), flush=True)[0][0].tobytes()
 
+            midencoded_packet = self.Lencoder.buffered_encode(memoryview(bytearray(mid)), flush=True)[0][0].tobytes()
+
             dual_encoded_packet = (midencoded_packet + b'\\x64\\x76' + sideencoded_packet)
+        elif self.stereomode == 3:
+            # stereo intensity (Joint encoding)
+            left_channel = pcm[:, 0]
+            right_channel = pcm[:, 1]
+
+            IRChannel = left_channel + self.intensity * (right_channel - left_channel)
+
+            Lencoded_packet = self.Rencoder.buffered_encode(memoryview(bytearray(left_channel)), flush=True)[0][0].tobytes()
+
+            IRencoded_packet = self.Lencoder.buffered_encode(memoryview(bytearray(IRChannel)), flush=True)[0][0].tobytes()
+
+            dual_encoded_packet = (Lencoded_packet + b'\\x64\\x77' + IRencoded_packet)
         else:
             # stereo LR
             left_channel = pcm[::2]
@@ -244,7 +307,7 @@ class DualOpusEncoder:
         return dual_encoded_packet
 
 class PSOpusEncoder:
-    def __init__(self, app="audio", samplerate=48000, version="stable"):
+    def __init__(self, app="restricted_lowdelay", samplerate=48000, version="stable"):
         """
         This version is xHE-Opus v2 (Parametric Stereo)
         ----------------------------- version--------------------------
@@ -442,6 +505,7 @@ class xOpusDecoder:
         self.Rdecoder.set_sampling_frequency(sample_rate)
 
         self.__prev_pan = 0.0
+        self.__prev_max_amplitude = 0.0
 
     def __smooth(self, value, prev_value, alpha=0.1):
         return alpha * value + (1 - alpha) * prev_value
@@ -578,13 +642,6 @@ class xOpusDecoder:
         shifted_signal = signal_complex * np.exp(1j * phase_shift)
         return shifted_signal.astype(np.int16)
 
-    def __butter_lowpass_filter_stereo(self, data, cutoff, fs, order=5):
-        nyq = 0.5 * fs
-        normal_cutoff = cutoff / nyq
-        b, a = butter(order, normal_cutoff, btype='low', analog=False)
-        filtered_data = np.apply_along_axis(lambda x: filtfilt(b, a, x), axis=0, arr=data)
-        return filtered_data.astype(np.int16)
-
     def __synthstereo(self, mono_signal, stereodata):
         pan = stereodata[2]
 
@@ -616,6 +673,9 @@ class xOpusDecoder:
         elif b"\\x64\\x75" in dualopusbytes:
             mode = 1
             xopusbytespilted = dualopusbytes.split(b'\\x64\\x75')
+        elif b"\\x64\\x77" in dualopusbytes:
+            mode = 4
+            xopusbytespilted = dualopusbytes.split(b'\\x64\\x77')
         elif b"\\x21\\x75" in dualopusbytes:
             mode = 3 # v2
             xopusbytespilted = dualopusbytes.split(b'\\x21\\x75')
@@ -628,7 +688,6 @@ class xOpusDecoder:
             Mpcm = np.frombuffer(decoded_left_channel_pcm, dtype=np.int16)
 
             stereo_signal = np.column_stack((Mpcm, Mpcm))
-
         elif mode == 2:
             # stereo mid/side (Joint encoding)
             Mencoded_packet = xopusbytespilted[0]
@@ -649,14 +708,32 @@ class xOpusDecoder:
 
                 stereo_signal = np.column_stack((L, R))
 
-                max_amplitude = np.max(np.abs(stereo_signal))
-                if max_amplitude > 1.0:
-                    stereo_signal /= max_amplitude
+                #max_amplitude = np.max(np.abs(stereo_signal))
+
+                #if max_amplitude > 1.0:
+                #    stereo_signal /= max_amplitude
+
+                stereo_signal = np.clip(stereo_signal, -1, 1)
 
                 stereo_signal = float32_to_int16(stereo_signal)
             else:
                 stereo_signal = np.column_stack((Mpcm, Mpcm))
+        elif mode == 4:
+            # stereo intensity
+            Lencoded_packet = xopusbytespilted[0]
+            IRencoded_packet = xopusbytespilted[1]
+
+            decoded_left_channel_pcm = self.Ldecoder.decode(memoryview(bytearray(Lencoded_packet)))
+            decoded_intensity_right_channel_pcm = self.Rdecoder.decode(memoryview(bytearray(IRencoded_packet)))
+
+            Lpcm = np.frombuffer(decoded_left_channel_pcm, dtype=np.int16)
+            IRpcm = np.frombuffer(decoded_intensity_right_channel_pcm, dtype=np.int16)
+
+            recovered_right = Lpcm + (IRpcm - Lpcm) / 1
+
+            stereo_signal = np.column_stack((Lpcm, recovered_right))
         elif mode == 3:
+            # Parametric Stereo
             Mencoded_packet = xopusbytespilted[0]
             stereodatapacked = xopusbytespilted[1]
 
@@ -803,6 +880,7 @@ class XopusReader:
     def __init__(self, file):
         self.file = open(file, 'rb')
         self.xopusline = self.file.read().split(b"\\xa")
+        self.lastframe = b""
 
     def readmetadata(self):
         header = HeaderContainer.deserialize(self.xopusline[0])
@@ -828,10 +906,12 @@ class XopusReader:
                     break
                 else:
                     try:
-                        yield decoder.decode(data)
+                        decodeddata = decoder.decode(data)
+                        self.lastframe = decodeddata
+                        yield decodeddata
                     except Exception as e:
                         #print(e)
-                        yield b""
+                        yield self.lastframe
         else:
             decodedlist = []
             for data in self.xopusline[1:]:
@@ -839,9 +919,11 @@ class XopusReader:
                     break
                 else:
                     try:
-                        decodedlist.append(decoder.decode(data))
+                        decodeddata = decoder.decode(data)
+                        self.lastframe = decodeddata
+                        decodedlist.append(self.lastframe)
                     except:
-                        decodedlist.append(b"")
+                        decodedlist.append(self.lastframe)
             return decodedlist
 
     def close(self):
