@@ -51,9 +51,18 @@ class App:
     def changeprofileopus(self, sender, data):
         if data == "xHE-Opus v2":
             dpg.configure_item("opusstereomode", show=False)
+            dpg.configure_item("opus3psbitratepercentage", show=False)
+            dpg.configure_item("opusbitratebalance", show=False)
             dpg.configure_item("opusbitrate", min_value=2.5, max_value=510, min_clamped=True, max_clamped=True, step_fast=1, default_value=64)
+        if data == "xHE-Opus v3":
+            dpg.configure_item("opusstereomode", show=False)
+            dpg.configure_item("opusbitratebalance", show=False)
+            dpg.configure_item("opusbitrate", min_value=2.5, max_value=255, min_clamped=True, max_clamped=True, step_fast=1, default_value=64)
+            dpg.configure_item("opus3psbitratepercentage", show=True)
         else:
             dpg.configure_item("opusstereomode", show=True)
+            dpg.configure_item("opus3psbitratepercentage", show=False)
+            dpg.configure_item("opusbitratebalance", show=True)
             dpg.configure_item("opusbitrate", min_value=5, max_value=1020, min_clamped=True, max_clamped=True, step_fast=1, default_value=64)
 
     def selectdeoutputpath(self, sender, data):
@@ -93,6 +102,7 @@ class App:
         profile = str(dpg.get_value("opusprofile")).strip().lower()
         stereomode = str(dpg.get_value("opusstereomode")).lower()
         bitbalance = dpg.get_value("opusbitratebalance")
+        psbitper = dpg.get_value("opus3psbitratepercentage")
 
         if stereomode == "l/r":
             stereomode = 1
@@ -127,6 +137,9 @@ class App:
 
                 encoder.set_stereo_mode(stereomode, dpg.get_value("opusautomono"), dpg.get_value("opusmsautomonogate"), dpg.get_value("opusintensity"))
                 encoder.set_bitrates(int(dpg.get_value("opusbitrate") * 1000), balance_percent=bitbalance)
+            if profile == "xhe-opus v3":
+                encoder = libxheopus.PS2OpusEncoder(dpg.get_value("opusapp"), 48000, dpg.get_value("opusversion"))
+                encoder.set_bitrates(int(dpg.get_value("opusbitrate") * 1000), psbitper)
             else:
                 encoder = libxheopus.PSOpusEncoder(dpg.get_value("opusapp"), 48000, dpg.get_value("opusversion"))
                 encoder.set_bitrates(int(dpg.get_value("opusbitrate") * 1000))
@@ -299,7 +312,7 @@ class App:
             dpg.add_button(label="Select Input File", callback=self.selectinputfile)
             dpg.add_button(label="Select Output Path", callback=self.selectoutputpath)
 
-            dpg.add_combo(["xHE-Opus v1", "xHE-Opus v2"], label="Profile", default_value="xHE-Opus v1", tag="opusprofile", callback=self.changeprofileopus)
+            dpg.add_combo(["xHE-Opus v1", "xHE-Opus v2", "xHE-Opus v3"], label="Profile", default_value="xHE-Opus v1", tag="opusprofile", callback=self.changeprofileopus)
             dpg.add_combo(["hev2", "exper", "stable", "old"], label="Version", default_value="hev2", tag="opusversion", callback=self.changeversionopus)
             dpg.add_combo(["120", "100", "80", "60", "40", "20", "10", "5"], label="Frame Size (ms)", tag="opusframesize", default_value="120")
             dpg.add_combo(["voip", "audio", "restricted_lowdelay"], label="Application", default_value="restricted_lowdelay", tag="opusapp")
@@ -309,10 +322,11 @@ class App:
             dpg.add_combo(["Auto", "Voice", "Music"], label="Signal Type", tag="opussignaltype", default_value="Auto")
 
             dpg.add_input_int(label="Bitrates Balance", min_value=-1, max_value=100, min_clamped=True, max_clamped=True, step_fast=1, default_value=-1, tag="opusbitratebalance")
+            dpg.add_input_int(label="PS Bitrate Percent", min_value=25, max_value=100, min_clamped=True, max_clamped=True, step_fast=1, default_value=25, tag="opus3psbitratepercentage", show=False)
             dpg.add_input_float(label="Bitrates", min_value=5, max_value=1020, min_clamped=True, max_clamped=True, step_fast=1, default_value=64, tag="opusbitrate")
             dpg.add_input_int(label="Compression Level", max_clamped=True, min_clamped=True, min_value=0, max_value=10, default_value=10, tag="opuscompression")
             dpg.add_input_int(label="Packet Loss", max_clamped=True, min_clamped=True, min_value=0, max_value=100, default_value=0, tag="opuspacketloss")
-            dpg.add_input_int(label="Auto Mono Threshold (Mid/Side Encoding)", min_value=0, max_value=-100, min_clamped=True, max_clamped=True, step_fast=1, default_value=-50, tag="opusmsautomonogate")
+            dpg.add_input_int(label="Auto Mono Threshold (Mid/Side Encoding)", min_value=-100, max_value=0, min_clamped=True, max_clamped=True, step_fast=1, default_value=-50, tag="opusmsautomonogate")
             dpg.add_input_float(label="Intensity (Intensity Encoding)", max_clamped=True, min_clamped=True, min_value=0, max_value=10, default_value=1, tag="opusintensity")
 
             dpg.add_checkbox(label="Prediction", tag="opusenapred")

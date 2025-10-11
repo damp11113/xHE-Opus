@@ -4,7 +4,7 @@ import struct
 import pyogg
 import os
 import numpy as np
-from scipy.signal import butter, filtfilt
+from stereops import stereo_frequency_analysis, apply_stereo, unpack_stereo_metadata, pack_stereo_metadata
 
 def float32_to_int16(data_float32):
     data_int16 = (data_float32 * 32767).astype(np.int16)
@@ -493,6 +493,244 @@ class PSOpusEncoder:
 
         return encoded_packet
 
+class PS2OpusEncoder:
+    def __init__(self, app="restricted_lowdelay", samplerate=48000, version="stable"):
+        """
+        This version is xHE-Opus v2 (Parametric Stereo v2)
+        ----------------------------- version--------------------------
+        hev2: libopus 1.5.1 (fre:ac)
+        exper: libopus 1.5.1
+        stable: libopus 1.4
+        old: libopus 1.3.1
+        custom: custom opus path you can use "pyogg_win_libopus_custom_path" env to change opus version (windows only)
+        ------------------------- App----------------------------------
+
+        Set the encoding mode.
+
+        This must be one of 'voip', 'audio', or 'restricted_lowdelay'.
+
+        'voip': Gives best quality at a given bitrate for voice
+        signals. It enhances the input signal by high-pass
+        filtering and emphasizing formants and
+        harmonics. Optionally it includes in-band forward error
+        correction to protect against packet loss. Use this mode
+        for typical VoIP applications. Because of the enhancement,
+        even at high bitrates the output may sound different from
+        the input.
+
+        'audio': Gives best quality at a given bitrate for most
+        non-voice signals like music. Use this mode for music and
+        mixed (music/voice) content, broadcast, and applications
+        requiring less than 15 ms of coding delay.
+
+        'restricted_lowdelay': configures low-delay mode that
+        disables the speech-optimized mode in exchange for
+        slightly reduced delay. This mode can only be set on an
+        newly initialized encoder because it changes the codec
+        delay.
+        """
+        self.version = version
+        self.samplerate = samplerate
+
+        os.environ["pyogg_win_libopus_version"] = version
+        importlib.reload(pyogg.opus)
+
+        self.encoder = pyogg.OpusBufferedEncoder()
+
+        self.encoder.set_application(app)
+
+        self.encoder.set_sampling_frequency(samplerate)
+
+        self.encoder.set_channels(1)
+
+        self.set_frame_size()
+        self.set_compression()
+        self.set_feature()
+        self.set_bitrate_mode()
+        self.set_bitrates()
+        self.set_bandwidth()
+        self.set_packet_loss()
+
+        self.ps_target_bitrate = 0
+        self.taget_bitrate = 0
+        self.tolerance = 0.05  # 5% tolerance
+        self.adjustment_step = 1  # How much to adjust points each iteration
+        self.min_points = 2  # Minimum points to maintain quality
+        self.max_points = 256  # Maximum points
+        self.minf = 120
+        self.maxf = 12000
+        self.points = 8
+        self.bframe = 1000 / 60
+
+    def set_compression(self, level=10):
+        """complex 0-10 low-hires"""
+        self.encoder.set_compresion_complex(level)
+
+    def set_bitrates(self, bitrates=32000, PSBitratePercent=25):
+        """input birate unit: bps"""
+        if bitrates <= 2500:
+            bitrates = 2500
+
+        self.ps_target_bitrate = bitrates * (PSBitratePercent / 100)
+        codec_target_bitrate = bitrates * ((100 - PSBitratePercent) / 100)
+        self.taget_bitrate = bitrates
+
+        self.encoder.set_bitrates(int(codec_target_bitrate))
+
+    def set_bandwidth(self, bandwidth="fullband"):
+        """
+        narrowband:
+        Narrowband typically refers to a limited range of frequencies suitable for voice communication.
+
+        mediumband (unsupported in libopus 1.3+):
+        Mediumband extends the frequency range compared to narrowband, providing better audio quality.
+
+        wideband:
+        Wideband offers an even broader frequency range, resulting in higher audio fidelity compared to narrowband and mediumband.
+
+        superwideband:
+        Superwideband extends the frequency range beyond wideband, further enhancing audio quality.
+
+        fullband (default):
+        Fullband provides the widest frequency range among the listed options, offering the highest audio quality.
+
+        auto: opus is working auto not force
+        """
+        self.encoder.set_bandwidth(bandwidth)
+
+    def set_frame_size(self, size=60):
+        """ Set the desired frame duration (in milliseconds).
+        Valid options are 2.5, 5, 10, 20, 40, or 60ms.
+        Exclusive for HE opus v2 (freac opus) 80, 100 or 120ms.
+
+        @return chunk size
+        """
+        if self.version != "hev2" and size > 60:
+            raise ValueError("non hev2 can't use framesize > 60")
+
+        self.encoder.set_frame_size(size)
+        self.bframe = 1000 / size
+
+        return int((size / 1000) * self.samplerate)
+
+    def set_packet_loss(self, loss=0):
+        """input: % percent"""
+        if loss > 100:
+            raise ValueError("percent must <=100")
+
+        self.encoder.set_packets_loss(loss)
+
+    def set_bitrate_mode(self, mode="CVBR"):
+        """VBR, CVBR, CBR
+        VBR in 1.5.x replace by CVBR
+        """
+
+        self.encoder.set_bitrate_mode(mode)
+
+    def set_feature(self, prediction=False, phaseinvert=False, DTX=False):
+        self.encoder.CTL(pyogg.opus.OPUS_SET_PREDICTION_DISABLED_REQUEST, int(prediction))
+        self.encoder.CTL(pyogg.opus.OPUS_SET_PHASE_INVERSION_DISABLED_REQUEST, int(phaseinvert))
+        self.encoder.CTL(pyogg.opus.OPUS_SET_DTX_REQUEST, int(DTX))
+
+    def enable_voice_mode(self, enable=True, auto=False):
+        self.encoder.enable_voice_enhance(enable, auto)
+
+    def encode(self, pcmbytes, directpcm=False):
+        """input: pcm bytes accept float32/int16 only
+        x74 is mono
+        x75 is stereo LR
+        x76 is stereo mid/side
+
+        xnl is no side audio
+        """
+        if directpcm:
+            if pcmbytes.dtype == np.float32:
+                pcm = (pcmbytes * 32767).astype(np.int16)
+            elif pcmbytes.dtype == np.int16:
+                pcm = pcmbytes.astype(np.int16)
+            else:
+                raise TypeError("accept only int16/float32")
+        else:
+            pcm = np.frombuffer(pcmbytes, dtype=np.int16)
+
+        input_array = pcm.reshape(-1, 2)
+
+        # Smart bitrate control loop
+        iteration = 0
+        max_iterations = 100  # Prevent infinite loops
+
+        while iteration < max_iterations:
+            # Parameter
+            stereo_profile = stereo_frequency_analysis(
+                audio_data=input_array,
+                sample_rate=48000,
+                min_freq=self.minf,
+                max_freq=self.maxf,
+                freq_points=self.points,
+                floor_db=-50.0,
+                use_grouping=True
+            )
+
+            pan_values = [pan for freq, pan, ipd, ic in stereo_profile]
+            ipd_values = [ipd for freq, pan, ipd, ic in stereo_profile]
+            ic_values = [ic for freq, pan, ipd, ic in stereo_profile]
+
+            packed = pack_stereo_metadata(pan_values, ipd_values, ic_values, self.minf, self.maxf, self.points, len(stereo_profile))
+
+            mono_audio = np.mean(input_array, axis=1).astype(np.int16)
+
+            encoded_packet = self.encoder.buffered_encode(memoryview(bytearray(mono_audio)), flush=True)[0][0]
+
+            # Calculate bitrates
+            ps_bitrate = len(packed) * 8 * self.bframe
+            codec_bitrate = len(encoded_packet) * 8 * self.bframe
+            total_bitrate = ps_bitrate + codec_bitrate
+
+            # Calculate difference from target
+            bitrate_diff = total_bitrate - self.taget_bitrate
+            bitrate_diff_percent = abs(bitrate_diff) / self.taget_bitrate
+
+            # Check if within tolerance
+            if bitrate_diff_percent <= self.tolerance:
+                # Within acceptable range
+                break
+
+            # Smart adjustment based on how far we are from target
+            if bitrate_diff > 0:  # Over target
+                # Calculate adjustment magnitude based on difference
+                if bitrate_diff_percent > 0.15:  # More than 15% over
+                    step = max(3, int(self.points * 0.1))  # Larger adjustment
+                elif bitrate_diff_percent > 0.10:  # More than 10% over
+                    step = 2
+                else:
+                    step = 1
+
+                new_points = max(self.min_points, self.points - step)
+                if new_points == self.points:
+                    # Can't reduce further, accept current
+                    break
+                self.points = new_points
+            else:  # Under target
+                # Calculate adjustment magnitude based on difference
+                if bitrate_diff_percent > 0.15:  # More than 15% under
+                    step = max(3, int(self.points * 0.1))  # Larger adjustment
+                elif bitrate_diff_percent > 0.10:  # More than 10% under
+                    step = 2
+                else:
+                    step = 1
+
+                new_points = min(self.max_points, self.points + step)
+                if new_points == self.points:
+                    # Can't increase further, accept current
+                    break
+                self.points = new_points
+
+            iteration += 1
+
+        encoded_packet = (encoded_packet.tobytes() + b'\\x32\\x75' + packed)
+
+        return encoded_packet
+
 class xOpusDecoder:
     def __init__(self, sample_rate=48000):
         self.Ldecoder = pyogg.OpusDecoder()
@@ -662,23 +900,26 @@ class xOpusDecoder:
 
         return self.__mix_stereo_signals(l1, stereo_signal_shifted, volume1=1, volume2=0.5).astype(np.int16)
 
-    def decode(self, dualopusbytes: bytes, outputformat=np.int16):
+    def decode(self, xopusbytes: bytes, outputformat=np.int16):
         # mode check
-        if b"\\x64\\x74" in dualopusbytes:
+        if b"\\x64\\x74" in xopusbytes:
             mode = 0
-            xopusbytespilted = dualopusbytes.split(b'\\x64\\x74')
-        elif b"\\x64\\x76" in dualopusbytes:
+            xopusbytespilted = xopusbytes.split(b'\\x64\\x74')
+        elif b"\\x64\\x76" in xopusbytes:
             mode = 2
-            xopusbytespilted = dualopusbytes.split(b'\\x64\\x76')
-        elif b"\\x64\\x75" in dualopusbytes:
+            xopusbytespilted = xopusbytes.split(b'\\x64\\x76')
+        elif b"\\x64\\x75" in xopusbytes:
             mode = 1
-            xopusbytespilted = dualopusbytes.split(b'\\x64\\x75')
-        elif b"\\x64\\x77" in dualopusbytes:
+            xopusbytespilted = xopusbytes.split(b'\\x64\\x75')
+        elif b"\\x64\\x77" in xopusbytes:
             mode = 4
-            xopusbytespilted = dualopusbytes.split(b'\\x64\\x77')
-        elif b"\\x21\\x75" in dualopusbytes:
+            xopusbytespilted = xopusbytes.split(b'\\x64\\x77')
+        elif b"\\x21\\x75" in xopusbytes:
             mode = 3 # v2
-            xopusbytespilted = dualopusbytes.split(b'\\x21\\x75')
+            xopusbytespilted = xopusbytes.split(b'\\x21\\x75')
+        elif b"\\x32\\x75" in xopusbytes:
+            mode = 5 # v3
+            xopusbytespilted = xopusbytes.split(b'\\x32\\x75')
         else:
             raise TypeError("this is not xopus bytes")
 
@@ -745,6 +986,43 @@ class xOpusDecoder:
             stereo_audio = np.stack((Mpcm, Mpcm)).T.reshape(-1, 2)
 
             stereo_signal = self.__synthstereo(stereo_audio, stereodata)
+        elif mode == 5:
+            # Parametric Stereo v2
+            Mencoded_packet = xopusbytespilted[0]
+            stereodatapacked = xopusbytespilted[1]
+
+            decoded_pcm = self.Ldecoder.decode(memoryview(bytearray(Mencoded_packet)))
+            Lpcm = np.frombuffer(decoded_pcm, dtype=np.int16)
+
+            p, ip, ic, minf, maxf, points = unpack_stereo_metadata(stereodatapacked)
+
+            reconstructed_stereo = apply_stereo(
+                mono_audio=Lpcm,
+                sample_rate=48000,
+                pan_values=p,
+                ipd_values=ip,
+                ic_values=ic,
+                min_freq=minf,
+                max_freq=maxf,
+                freq_points=points,
+                use_grouping=True
+            )
+
+            f32c = reconstructed_stereo.astype(np.float32) / 32768.0
+            chunks = [f32c]
+            chunk = np.concatenate(chunks)
+
+            fade = 64  # samples
+
+            # Cosine fade curve (smooth)
+            fade_in = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, fade))[:, np.newaxis]
+            fade_out = 0.5 - 0.5 * np.cos(np.linspace(np.pi, 0, fade))[:, np.newaxis]
+
+            # Apply to both stereo channels
+            chunk[:fade] *= fade_in
+            chunk[-fade:] *= fade_out
+
+            stereo_signal = np.clip(chunk * 32767.0, -32768, 32767).reshape(-1, 2)
         else:
             # stereo LR
             Lencoded_packet = xopusbytespilted[0]
