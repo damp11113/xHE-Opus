@@ -158,7 +158,7 @@ def stereo_frequency_analysis(
                 else:
                     ic_value = 0.0
 
-        results.append((float(target_freq), float(pan_value), float(ipd_value), float(ic_value)))
+        results.append((float(target_freq), float(-pan_value), float(ipd_value), float(ic_value)))
 
     return results
 
