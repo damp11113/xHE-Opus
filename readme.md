@@ -10,6 +10,9 @@ It has content loudness metadata on footer.
 xHE-Opus v2 is extended High Efficiency. It use parametric stereo to encode stereo channel.
 It provides optimal coding efficiency with bitrates from 2.5 to 510 kilobits per second and above.
 
+### xHE-Opus v3 (Experiment)
+xHE-Opus v3 is Opus with Advanced Parametric stereo coding.
+
 ![xheopusquality](https://github.com/damp11113/xHE-Opus/assets/64675096/c2d898c3-7a5e-487b-bd2c-0a364eeec1e7)
 
 # Demo
