@@ -4,7 +4,7 @@ import struct
 import pyogg
 import os
 import numpy as np
-from stereops import stereo_frequency_analysis, apply_stereo, unpack_stereo_metadata, pack_stereo_metadata
+from stereops import PSCoder, unpack_stereo_metadata, pack_stereo_metadata
 
 def float32_to_int16(data_float32):
     data_int16 = (data_float32 * 32767).astype(np.int16)
@@ -551,6 +551,8 @@ class PS2OpusEncoder:
         self.set_bandwidth()
         self.set_packet_loss()
 
+        self.pscoder = PSCoder(samplerate, floor_db=-50)
+
         self.ps_target_bitrate = 0
         self.taget_bitrate = 0
         self.tolerance = 0.05  # 5% tolerance
@@ -635,6 +637,44 @@ class PS2OpusEncoder:
     def enable_voice_mode(self, enable=True, auto=False):
         self.encoder.enable_voice_enhance(enable, auto)
 
+    def _detect_max_freq_response(self, fft_result, freq, noise_threshold_db):
+        """
+        Detect the maximum frequency with significant energy above the noise threshold.
+        Uses a more sophisticated method to find actual signal rolloff.
+
+        Args:
+            fft_result: FFT result (complex array)
+            freq: Frequency bins corresponding to FFT result
+
+        Returns:
+            Maximum frequency in Hz with significant energy
+        """
+        # Convert to magnitude (linear scale)
+        magnitude = np.abs(fft_result)
+
+        # Convert to dB scale
+        # Add small epsilon to avoid log(0)
+        magnitude_db = 20 * np.log10(magnitude + 1e-10)
+
+        # Find the peak magnitude (reference level)
+        peak_db = np.max(magnitude_db)
+
+        # Calculate relative threshold (dB below peak)
+        # Looking for frequencies that are within a certain range of the peak
+        relative_threshold = peak_db + noise_threshold_db
+
+        # Find frequencies above the relative threshold
+        above_threshold = magnitude_db > relative_threshold
+
+        if np.any(above_threshold):
+            # Find the highest frequency above threshold
+            max_freq_idx = np.where(above_threshold)[0][-1]
+            max_freq = freq[max_freq_idx]
+
+            return int(max_freq)
+        else:
+            return 0
+
     def encode(self, pcmbytes, directpcm=False):
         """input: pcm bytes accept float32/int16 only
         x74 is mono
@@ -661,25 +701,23 @@ class PS2OpusEncoder:
 
         while iteration < max_iterations:
             # Parameter
-            stereo_profile = stereo_frequency_analysis(
-                audio_data=input_array,
-                sample_rate=48000,
-                min_freq=self.minf,
-                max_freq=self.maxf,
-                freq_points=self.points,
-                floor_db=-50.0,
-                use_grouping=True
-            )
+            stereo_profile = self.pscoder.analyze(input_array)
 
             pan_values = [pan for freq, pan, ipd, ic in stereo_profile]
             ipd_values = [ipd for freq, pan, ipd, ic in stereo_profile]
             ic_values = [ic for freq, pan, ipd, ic in stereo_profile]
 
-            packed = pack_stereo_metadata(pan_values, ipd_values, ic_values, self.minf, self.maxf, self.points, len(stereo_profile))
-
             mono_audio = np.mean(input_array, axis=1).astype(np.int16)
 
             encoded_packet = self.encoder.buffered_encode(memoryview(bytearray(mono_audio)), flush=True)[0][0]
+
+            side = (input_array[:, 0] - input_array[:, 1]) / 2
+            side_fft_result = np.fft.rfft(side)
+            side_freq = np.fft.rfftfreq(len(side), 1 / 48000)
+            max_freq_stereo = self._detect_max_freq_response(side_fft_result, side_freq, -30)
+
+            self.pscoder.set_freq(self.minf, min(max_freq_stereo, self.maxf), self.points)
+            packed = pack_stereo_metadata(pan_values, ipd_values, ic_values, self.minf, min(max_freq_stereo, self.maxf), self.points, len(stereo_profile))
 
             # Calculate bitrates
             ps_bitrate = len(packed) * 8 * self.bframe
@@ -744,6 +782,9 @@ class xOpusDecoder:
 
         self.__prev_pan = 0.0
         self.__prev_max_amplitude = 0.0
+        self.sample_rate = sample_rate
+
+        self.pscoder = None
 
     def __smooth(self, value, prev_value, alpha=0.1):
         return alpha * value + (1 - alpha) * prev_value
@@ -987,6 +1028,9 @@ class xOpusDecoder:
 
             stereo_signal = self.__synthstereo(stereo_audio, stereodata)
         elif mode == 5:
+            if not self.pscoder:
+                self.pscoder = PSCoder(self.sample_rate)
+
             # Parametric Stereo v2
             Mencoded_packet = xopusbytespilted[0]
             stereodatapacked = xopusbytespilted[1]
@@ -996,16 +1040,13 @@ class xOpusDecoder:
 
             p, ip, ic, minf, maxf, points = unpack_stereo_metadata(stereodatapacked)
 
-            reconstructed_stereo = apply_stereo(
+            self.pscoder.set_freq(minf, maxf, points)
+
+            reconstructed_stereo = self.pscoder.apply(
                 mono_audio=Lpcm,
-                sample_rate=48000,
                 pan_values=p,
                 ipd_values=ip,
-                ic_values=ic,
-                min_freq=minf,
-                max_freq=maxf,
-                freq_points=points,
-                use_grouping=True
+                ic_values=ic
             )
 
             f32c = reconstructed_stereo.astype(np.float32) / 32768.0
